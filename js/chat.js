@@ -85,8 +85,14 @@
       body: body ? JSON.stringify(body) : undefined,
       cache: "no-store",
     });
-    let data = {};
-    try { data = await res.json(); } catch (e) { /* not json: probably no backend */ }
+    let data = null;
+    try { data = await res.json(); } catch (e) { /* not json */ }
+    // no JSON back means the chat server code isn't running (the host served a normal page)
+    if (!data || typeof data !== "object") {
+      const err = new Error("not_setup");
+      err.status = res.status;
+      throw err;
+    }
     if (!res.ok) {
       const err = new Error(data.error || (res.status === 404 || res.status === 405 ? "not_setup" : "http_" + res.status));
       err.status = res.status;
