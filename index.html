@@ -24,6 +24,7 @@
 
   <link rel="stylesheet" href="css/styles.css?v=8">
   <link rel="stylesheet" href="css/vibes.css?v=8">
+  <link rel="stylesheet" href="css/chat.css?v=1">
 
   <!-- logo image sizing -->
   <style>
@@ -67,6 +68,9 @@
       <button class="rail-btn rail-app" type="button" data-panel-toggle="sportsyou" data-tip="sportsYou" aria-label="sportsYou" aria-expanded="false" aria-controls="panel-sportsyou">
         <span class="sy-tile"><span class="brand-sy"></span></span>
       </button>
+      <button class="rail-btn rail-chat" type="button" data-panel-toggle="chat" data-tip="Chat" aria-label="Chat" aria-expanded="false" aria-controls="panel-chat">
+        <span data-icon="message-circle"></span><span class="chat-dot" data-chat-dot></span>
+      </button>
       <span class="rail-sep" aria-hidden="true"></span>
       <button class="rail-btn rail-jump" type="button" data-jump="now" data-tip="Right now" aria-label="Go to Right now"><span data-icon="clock"></span></button>
       <button class="rail-btn rail-jump" type="button" data-jump="classes" data-tip="Classes" aria-label="Go to Classes"><span data-icon="layout-grid"></span></button>
@@ -94,6 +98,16 @@
         <label class="set-row sy-direct"><span class="set-label">Skip this panel next time<small>The sidebar button opens sportsYou straight away</small></span><input class="switch" type="checkbox" id="sy-direct"></label>
         <p class="sy-note"><span data-icon="info"></span><span>sportsYou doesn't allow other websites to show it inside them, so it can't live inside this panel the way Spotify does.</span></p>
       </div>
+    </aside>
+
+    <!-- CHAT (js/chat.js): the same little chat that's on the lock page -->
+    <aside class="side-panel" id="panel-chat" data-panel="chat" aria-label="Chat" inert>
+      <header class="panel-head">
+        <span class="chat-head-icon" data-icon="heart"></span>
+        <h2>Chat</h2>
+        <button class="icon-btn" type="button" data-panel-close aria-label="Close" title="Close"><span data-icon="x"></span></button>
+      </header>
+      <div class="chat-panel-body"></div>
     </aside>
 
     <header class="topbar wrap">
@@ -456,10 +470,11 @@
   </dialog>
 
   <!-- Only these load before unlocking (no private data). js/gate.js loads the rest. -->
-  <script src="js/icons.js?v=8"></script>
+  <script src="js/icons.js?v=9"></script>
   <script src="js/prefs.js?v=8"></script>
   <script src="js/sky.js?v=8"></script>
   <script src="data/private.js?v=8"></script>
   <script src="js/gate.js?v=8"></script>
+  <script src="js/chat.js?v=1"></script>
 </body>
 </html>

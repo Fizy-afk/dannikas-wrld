@@ -22,6 +22,15 @@ A private hub and Chrome home page, made as a gift.
 - **Settings (gear icon):** name, color, starfield, motion, clock, search engine, which sections show, backup, and locking the device.
 - **Edit mode:** hold down on anything. Items wiggle, sections, cards and shortcuts can be dragged into a new order and snap into place, and the − badge hides something.
 - **Background:** a live starfield, shooting stars, cards that light up and tilt, and a sparkle when a to-do is checked off.
+- **Chat:** a little chat room — a floating bubble on the password page, and a Chat button in the sidebar once unlocked. It needs its own short chat code (separate from the password), which each device remembers.
+
+## Chat setup (Cloudflare)
+The chat runs on a Cloudflare Pages Function (`functions/api/chat.js`) with a D1 database. Messages are stored there, not on GitHub.
+- D1 database: **wrld-chat** (already created).
+- On the Pages project → Settings → Bindings: add a **D1 database** binding named `CHAT_DB` → `wrld-chat`.
+- On the Pages project → Settings → Variables and Secrets: add a **secret** named `CHAT_CODE` with the chat code.
+- Redeploy (or push any commit) so the binding and secret take effect.
+- To change the code later, edit `CHAT_CODE` and redeploy; devices will ask for the new one.
 
 ## Code map
 | File | Job |
