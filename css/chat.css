@@ -130,7 +130,8 @@ html.locked .chat-float { display: block; }
 .chat-head { display: flex; align-items: center; gap: 8px; padding: 14px 12px 12px 16px; border-bottom: 1px solid var(--line); }
 .chat-head h2 { flex: 1; margin: 0; font: 400 24px/1 var(--serif); }
 .chat-head-icon { color: var(--wrld); }
-.chat-leave .i, .panel-head .chat-leave .i { width: 15px; height: 15px; }
+.chat-leave .i, .chat-bell .i { width: 15px; height: 15px; }
+.chat-bell[aria-pressed="false"] { color: var(--faint); }
 
 @media (max-width: 480px) {
   .chat-fab { right: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); }

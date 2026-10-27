@@ -5,8 +5,11 @@
    and need a separate short chat code, so strangers who find the page can't
    read them. This file loads straight from index.html, before unlocking.
 
+   Alerts: a soft chime, "(1) New message" in the tab title and (if allowed)
+   a desktop pop-up when a message arrives while you're elsewhere.
+
    Device-only storage (never synced, never in backups): wrldchat.code,
-   wrldchat.name, wrldchat.seen
+   wrldchat.name, wrldchat.seen, wrldchat.sound
    ============================================================================ */
 (function () {
   "use strict";
@@ -14,7 +17,8 @@
   const API = "/api/chat";
   const FAST = 3000;    // checking for new messages while the chat is open
   const SLOW = 30000;   // ...while it's closed (for the unread dot)
-  const K = { code: "wrldchat.code", name: "wrldchat.name", seen: "wrldchat.seen" };
+  const HIDDEN = 15000; // ...while on another tab (browsers may slow this to ~1/min)
+  const K = { code: "wrldchat.code", name: "wrldchat.name", seen: "wrldchat.seen", sound: "wrldchat.sound" };
 
   const store = {
     get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
@@ -38,6 +42,73 @@
   let timer = null;
   let busy = false;
   let lastDay = "";
+  let soundOn = store.get(K.sound) !== "off";
+  let unreadHidden = 0;
+  const baseTitle = document.title;
+
+  /* ---------- alerts: chime, tab title, desktop pop-up ---------- */
+  let actx = null;
+  function unlockAudio() {
+    try {
+      if (!actx) { const AC = window.AudioContext || window.webkitAudioContext; if (AC) actx = new AC(); }
+      if (actx && actx.state === "suspended") actx.resume();
+    } catch (e) { /* no audio */ }
+  }
+  // browsers only allow sound after the person has tapped or typed on the page once
+  ["pointerdown", "keydown", "touchstart"].forEach((ev) => document.addEventListener(ev, unlockAudio, { passive: true }));
+
+  function tone(freqs, vol, dur, gap) {
+    if (!soundOn || !actx || actx.state === "closed") return;
+    if (actx.state !== "running") { actx.resume().then(() => { if (actx.state === "running") tone(freqs, vol, dur, gap); }, () => {}); return; }
+    const t0 = actx.currentTime + 0.01;
+    freqs.forEach((f, i) => {
+      const o = actx.createOscillator();
+      const g = actx.createGain();
+      const st = t0 + i * gap;
+      o.type = "sine";
+      o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, st);
+      g.gain.exponentialRampToValueAtTime(vol, st + 0.015);
+      g.gain.exponentialRampToValueAtTime(0.0001, st + dur);
+      o.connect(g).connect(actx.destination);
+      o.start(st);
+      o.stop(st + dur + 0.05);
+    });
+  }
+  const chime = () => tone([880, 1318.5], 0.16, 0.5, 0.12);   // someone else's message
+  const sentBlip = () => tone([740], 0.05, 0.16, 0);          // your own message going out
+
+  function setTitle() {
+    document.title = unreadHidden ? "(" + unreadHidden + ") New message · " + baseTitle : baseTitle;
+  }
+
+  function askNotify() {
+    try {
+      if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
+    } catch (e) { /* not supported */ }
+  }
+
+  function popup(m) {
+    try {
+      if (!("Notification" in window) || Notification.permission !== "granted" || !soundOn) return;
+      const n = new Notification(m.name, { body: m.text.slice(0, 140), icon: "logo.png", tag: "wrld-chat", renotify: true, silent: true });
+      n.onclick = () => { window.focus(); openChat(); n.close(); };
+    } catch (e) { /* some phones only allow pop-ups from an installed app */ }
+  }
+
+  // called with the messages that just arrived from the server (not on first load)
+  function alertNew(list) {
+    const theirs = list.filter((m) => m.name !== me);
+    if (!theirs.length) return;
+    const watching = open && !document.hidden;
+    if (watching) return;
+    chime();
+    if (document.hidden) {
+      unreadHidden += theirs.length;
+      setTitle();
+      popup(theirs[theirs.length - 1]);
+    }
+  }
 
   /* ---------- the view (shared by the lock bubble and the sidebar panel) ---------- */
   const view = el("div", "chat");
@@ -120,7 +191,8 @@
   const timeLabel = (d) => d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 
   function draw(list) {
-    if (!list.length) return;
+    const fresh = [];
+    if (!list.length) return fresh;
     const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
     const empty = log.querySelector(".chat-empty");
     if (empty) empty.remove();
@@ -140,11 +212,13 @@
       if (!grouped) row.appendChild(el("span", "chat-time", timeLabel(d)));
       log.appendChild(row);
       messages.push(m);
+      fresh.push(m);
       prev = m;
       lastId = m.id;
     });
     if (messages.length > 300) messages = messages.slice(-300);
     if (nearBottom || list.some((m) => m.name === me)) log.scrollTop = log.scrollHeight;
+    return fresh;
   }
 
   function resetLog() {
@@ -157,7 +231,7 @@
 
   /* ---------- unread dot ---------- */
   function markSeen() {
-    if (open && lastId > seenId) { seenId = lastId; store.set(K.seen, String(seenId)); }
+    if (open && !document.hidden && lastId > seenId) { seenId = lastId; store.set(K.seen, String(seenId)); }
     const unread = messages.some((m) => m.id > seenId && m.name !== me);
     document.querySelectorAll("[data-chat-dot]").forEach((n) => n.classList.toggle("on", unread));
   }
@@ -166,11 +240,12 @@
   async function poll() {
     clearTimeout(timer);
     if (!code || busy) return schedule();
-    if (document.hidden) return; // picks back up on visibilitychange
     busy = true;
     try {
+      const firstLoad = lastId === 0;
       const data = await call("GET");
-      draw(data.messages || []);
+      const fresh = draw(data.messages || []);
+      if (!firstLoad) alertNew(fresh);
       roomErr.textContent = "";
       markSeen();
     } catch (e) {
@@ -183,9 +258,15 @@
   }
   function schedule() {
     clearTimeout(timer);
-    if (code && !document.hidden) timer = setTimeout(poll, open ? FAST : SLOW);
+    if (code) timer = setTimeout(poll, document.hidden ? HIDDEN : open ? FAST : SLOW);
   }
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) return;
+    unreadHidden = 0;
+    setTitle();
+    markSeen();
+    poll();
+  });
 
   /* ---------- joining, sending, leaving ---------- */
   joinForm.addEventListener("submit", async (e) => {
@@ -196,6 +277,7 @@
     if (!tryCode || !name) return;
     joinForm.classList.add("busy");
     err.textContent = "";
+    askNotify();
     try {
       lastId = 0;
       const data = await call("GET", null, tryCode);
@@ -226,6 +308,7 @@
       textarea.value = "";
       grow();
       draw([data.message]);
+      sentBlip();
       markSeen();
     } catch (e) {
       roomErr.textContent = say(e);
@@ -250,15 +333,36 @@
     showRoom(false);
   }
 
-  /* ---------- header bits (sign out) ---------- */
+  /* ---------- header bits (sound on/off, sign out) ---------- */
+  function paintBells() {
+    document.querySelectorAll("[data-chat-bell]").forEach((b) => {
+      b.innerHTML = icon(soundOn ? "bell" : "bell-off");
+      const label = soundOn ? "Alerts on (tap to mute)" : "Alerts muted (tap to turn on)";
+      b.title = label;
+      b.setAttribute("aria-label", label);
+      b.setAttribute("aria-pressed", String(soundOn));
+    });
+  }
   function headerTools() {
+    const frag = document.createDocumentFragment();
+    const bell = el("button", "icon-btn chat-bell");
+    bell.type = "button";
+    bell.setAttribute("data-chat-bell", "");
+    bell.addEventListener("click", () => {
+      soundOn = !soundOn;
+      store.set(K.sound, soundOn ? "on" : "off");
+      paintBells();
+      if (soundOn) { unlockAudio(); askNotify(); setTimeout(chime, 60); }
+    });
+    frag.appendChild(bell);
     const b = el("button", "icon-btn chat-leave");
     b.type = "button";
     b.title = "Leave the chat on this device";
     b.setAttribute("aria-label", "Leave the chat on this device");
     b.innerHTML = icon("lock");
     b.addEventListener("click", () => { if (code && confirm("Leave the chat on this device? You'll need the chat code again.")) leave(); });
-    return b;
+    frag.appendChild(b);
+    return frag;
   }
 
   function setOpen(on) {
@@ -269,6 +373,11 @@
       markSeen();
     }
     poll();
+  }
+
+  function openChat() {
+    if (float) { if (!open) float.querySelector(".chat-fab").click(); }
+    else if (window.WRLD_SIDEBAR && !open) window.WRLD_SIDEBAR.open("chat");
   }
 
   /* ---------- lock page: floating bubble ---------- */
@@ -287,6 +396,7 @@
     const fab = float.querySelector(".chat-fab");
     sheet.querySelector(".chat-head").appendChild(headerTools());
     sheet.appendChild(view);
+    paintBells();
     fab.addEventListener("click", () => {
       const on = sheet.hidden;
       sheet.hidden = !on;
@@ -305,6 +415,7 @@
     if (!panel) return false;
     if (float) { float.remove(); float = null; }
     panel.querySelector(".panel-head").insertBefore(headerTools(), panel.querySelector("[data-panel-close]"));
+    paintBells();
     panel.querySelector(".chat-panel-body").appendChild(view);
     // sidebar.js opens/closes the panel; watch its class to know when the chat is on screen
     new MutationObserver(() => {
