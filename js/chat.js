@@ -5,8 +5,10 @@
    and need a separate short chat code, so strangers who find the page can't
    read them. This file loads straight from index.html, before unlocking.
 
-   Alerts: a soft chime, "(1) New message" in the tab title and (if allowed)
-   a desktop pop-up when a message arrives while you're elsewhere.
+   Alerts: a soft chime, "(1) New message" in the tab title, and real push
+   notifications (sw.js) that arrive even with the site closed, once the
+   browser is allowed to show notifications. iPhone needs the site added to
+   the Home Screen first; that's Apple's rule for web push.
 
    Device-only storage (never synced, never in backups): wrldchat.code,
    wrldchat.name, wrldchat.seen, wrldchat.sound
@@ -18,7 +20,7 @@
   const FAST = 3000;    // checking for new messages while the chat is open
   const SLOW = 30000;   // ...while it's closed (for the unread dot)
   const HIDDEN = 15000; // ...while on another tab (browsers may slow this to ~1/min)
-  const K = { code: "wrldchat.code", name: "wrldchat.name", seen: "wrldchat.seen", sound: "wrldchat.sound" };
+  const K = { code: "wrldchat.code", name: "wrldchat.name", seen: "wrldchat.seen", sound: "wrldchat.sound", iosHint: "wrldchat.iosHint" };
 
   const store = {
     get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
@@ -82,14 +84,69 @@
     document.title = unreadHidden ? "(" + unreadHidden + ") New message · " + baseTitle : baseTitle;
   }
 
+  /* ---------- push notifications (arrive even with the site closed) ---------- */
+  const canPush = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window && window.isSecureContext;
+  const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const standalone = window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+  let swReg = null;
+  let pushActive = false;
+
+  if ("serviceWorker" in navigator && window.isSecureContext) {
+    navigator.serviceWorker.register("sw.js").then((r) => { swReg = r; if (code && soundOn) pushEnable(); }).catch(() => {});
+    navigator.serviceWorker.addEventListener("message", (e) => {
+      if (!e.data) return;
+      if (e.data.type === "open-chat") openChat();
+      if (e.data.type === "chat-push") poll();
+    });
+  }
+
+  const keyBytes = (b64) => {
+    const s = b64.replace(/-/g, "+").replace(/_/g, "/");
+    return Uint8Array.from(atob(s + "===".slice((s.length + 3) % 4)), (c) => c.charCodeAt(0));
+  };
+
+  async function pushEnable() {
+    if (!canPush || !code || !me || !soundOn || Notification.permission !== "granted") return;
+    try {
+      const reg = swReg || (await navigator.serviceWorker.ready);
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) {
+        const res = await fetch(API + "?push=key", { headers: { "X-Chat-Code": code }, cache: "no-store" });
+        const { key } = await res.json();
+        if (!key) return;
+        sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(key) });
+      }
+      await call("POST", { action: "subscribe", name: me, sub: sub.toJSON() });
+      pushActive = true;
+    } catch (e) { pushActive = false; }
+  }
+
+  async function pushDisable() {
+    pushActive = false;
+    if (!canPush) return;
+    try {
+      const reg = swReg || (await navigator.serviceWorker.getRegistration());
+      const sub = reg && (await reg.pushManager.getSubscription());
+      if (!sub) return;
+      if (code) await call("POST", { action: "unsubscribe", endpoint: sub.endpoint }).catch(() => {});
+      await sub.unsubscribe();
+    } catch (e) { /* ignore */ }
+  }
+
+  // must run from a tap (browsers only show the "Allow notifications" prompt then)
   function askNotify() {
     try {
-      if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
+      if (!("Notification" in window)) return;
+      if (Notification.permission === "granted") { pushEnable(); return; }
+      if (Notification.permission === "default") {
+        Notification.requestPermission().then((p) => { if (p === "granted") pushEnable(); });
+      }
     } catch (e) { /* not supported */ }
   }
 
   function popup(m) {
     try {
+      if (pushActive) return; // the push notification covers it
       if (!("Notification" in window) || Notification.permission !== "granted" || !soundOn) return;
       const n = new Notification(m.name, { body: m.text.slice(0, 140), icon: "logo.png", tag: "wrld-chat", renotify: true, silent: true });
       n.onclick = () => { window.focus(); openChat(); n.close(); };
@@ -125,6 +182,7 @@
       </form>
     </div>
     <div class="chat-room" hidden>
+      <p class="chat-hint" hidden><span class="chat-hint-text">On iPhone, tap Share → <b>Add to Home Screen</b>, then open the site from there to get notifications.</span><button class="icon-btn" type="button" aria-label="Dismiss">${icon("x")}</button></p>
       <div class="chat-log" role="log" aria-live="polite" aria-label="Messages"></div>
       <form class="chat-send" autocomplete="off">
         <textarea name="text" rows="1" maxlength="1000" placeholder="Message" aria-label="Message"></textarea>
@@ -142,6 +200,12 @@
   const textarea = sendForm.elements.text;
   const roomErr = $(".chat-room-err");
   if (me) joinForm.elements.name.value = me;
+
+  const hint = $(".chat-hint");
+  function showIosHint() {
+    hint.hidden = !(isIOS && !standalone && !canPush && store.get(K.iosHint) !== "off");
+  }
+  hint.querySelector("button").addEventListener("click", () => { hint.hidden = true; store.set(K.iosHint, "off"); });
 
   function showRoom(on) {
     joinBox.hidden = on;
@@ -290,6 +354,8 @@
       log.scrollTop = log.scrollHeight;
       markSeen();
       schedule();
+      pushEnable();
+      showIosHint();
       setTimeout(() => textarea.focus(), 50);
     } catch (ex) {
       err.textContent = say(ex);
@@ -326,6 +392,7 @@
   textarea.addEventListener("input", grow);
 
   function leave() {
+    pushDisable();
     code = null;
     store.del(K.code);
     clearTimeout(timer);
@@ -353,6 +420,7 @@
       store.set(K.sound, soundOn ? "on" : "off");
       paintBells();
       if (soundOn) { unlockAudio(); askNotify(); setTimeout(chime, 60); }
+      else pushDisable();
     });
     frag.appendChild(bell);
     const b = el("button", "icon-btn chat-leave");
@@ -396,7 +464,6 @@
     const fab = float.querySelector(".chat-fab");
     sheet.querySelector(".chat-head").appendChild(headerTools());
     sheet.appendChild(view);
-    paintBells();
     fab.addEventListener("click", () => {
       const on = sheet.hidden;
       sheet.hidden = !on;
@@ -407,6 +474,7 @@
     });
     document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !sheet.hidden) fab.click(); });
     document.body.appendChild(float);
+    paintBells();
   }
 
   /* ---------- inside the site: sidebar panel ---------- */
@@ -425,14 +493,26 @@
     return true;
   }
 
+  function openFromLink() {
+    try {
+      const u = new URL(location.href);
+      if (u.searchParams.get("chat") !== "1") return;
+      u.searchParams.delete("chat");
+      history.replaceState(null, "", u.pathname + (u.search || "") + u.hash);
+      setTimeout(openChat, 300);
+    } catch (e) { /* ignore */ }
+  }
+
   /* ---------- go ---------- */
   resetLog();
   showRoom(!!code);
+  showIosHint();
   const unlocked = () => document.documentElement.classList.contains("unlocked");
-  if (unlocked()) mountPanel();
+  if (unlocked()) { mountPanel(); openFromLink(); }
   else {
     mountFloat();
-    window.addEventListener("wrld:ready", () => { mountPanel(); markSeen(); }, { once: true });
+    if (document.documentElement.classList.contains("locked")) openFromLink();
+    window.addEventListener("wrld:ready", () => { mountPanel(); markSeen(); openFromLink(); }, { once: true });
   }
   poll();
 })();

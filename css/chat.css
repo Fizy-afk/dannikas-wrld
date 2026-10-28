@@ -72,6 +72,10 @@
 .chat-send textarea:focus { border-color: var(--wrld); }
 .chat-send.busy .icon-btn { opacity: 0.55; pointer-events: none; }
 .chat-room-err { padding: 0 14px 10px; }
+.chat-hint { display: flex; align-items: center; gap: 8px; margin: 10px 12px 0; padding: 8px 6px 8px 12px; border: 1px solid color-mix(in srgb, var(--wrld) 30%, transparent); border-radius: 12px; background: color-mix(in srgb, var(--wrld) 8%, transparent); color: var(--muted); font-size: 12.5px; line-height: 1.4; }
+.chat-hint[hidden] { display: none; }
+.chat-hint b { color: var(--text); font-weight: 600; }
+.chat-hint .icon-btn { width: 28px; height: 28px; }
 
 /* unread dot (on the bubble and the sidebar button) */
 .chat-dot { position: absolute; top: 6px; right: 6px; width: 9px; height: 9px; border-radius: 50%; border: 2px solid #0c0816; background: var(--pink); opacity: 0; transform: scale(0.4); transition: opacity 0.2s, transform 0.3s var(--ease); pointer-events: none; }

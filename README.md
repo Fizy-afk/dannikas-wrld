@@ -31,6 +31,7 @@ The chat runs on a Cloudflare Pages Function (`functions/api/chat.js`) with a D1
 - On the Pages project → Settings → Variables and Secrets: add a **secret** named `CHAT_CODE` with the chat code.
 - Redeploy (or push any commit) so the binding and secret take effect.
 - To change the code later, edit `CHAT_CODE` and redeploy; devices will ask for the new one.
+- **Push notifications:** `sw.js` (background worker) shows a notification for new messages even when the site is closed. Each device signs up when notifications are allowed (on join or the bell button); signups live in the `subs` table and the signing key in the `config` table of `wrld-chat`. iPhone only supports this after adding the site to the Home Screen and opening it from there.
 
 ## Code map
 | File | Job |
